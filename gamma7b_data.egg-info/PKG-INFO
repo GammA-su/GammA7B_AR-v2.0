@@ -1,3 +1,24 @@
+Metadata-Version: 2.4
+Name: gamma7b-data
+Version: 0.2.0
+Summary: GammA-7B Stage A data pipeline
+Requires-Python: <3.11,>=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: datasets>=2.18
+Requires-Dist: zstandard>=0.22
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: numpy<2.0,>=1.26
+Requires-Dist: tokenizers>=0.15
+Requires-Dist: typer>=0.9
+Requires-Dist: tqdm>=4.66
+Requires-Dist: rich>=13.7
+Requires-Dist: faiss-gpu
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4; extra == "dev"
+Requires-Dist: pytest-xdist>=3.6; extra == "dev"
+Provides-Extra: stackexchange
+Requires-Dist: py7zr>=0.20; extra == "stackexchange"
+
 # GammA7B_AR-v2.0 — Stage A Data Pipeline
 
 Deterministic, license-aware pretraining data pipeline for Stage A next-token training. Produces normalized shards, deduped corpora, and packed fixed-length token sequences suitable for pretraining.
@@ -28,9 +49,7 @@ Edit `stageA_manifest.yaml` (or `configs/stageA_manifest.yaml`) with your paths 
 All commands are deterministic given `--seed`.
 
 ```
-python -m gamma7b_data.cli hf-configs --dataset HuggingFaceFW/fineweb-2 --filter eng
 python -m gamma7b_data.cli hf-stream --source fineweb2 --out-dir data/normalized
-python -m gamma7b_data.cli hf-stream --source fineweb2 --config-name eng_Latn --out-dir data/normalized
 python -m gamma7b_data.cli ingest-wikipedia --input /path/to/wikiextractor --out-dir data/normalized
 python -m gamma7b_data.cli ingest-stackexchange --input /path/to/Posts.xml --out-dir data/normalized
 
@@ -59,9 +78,6 @@ Global flags:
 - `--faiss-gpu 1` (default GPU device to probe/use)
 - `--verbose`
 - `--log-every 300` (default progress cadence)
-
-Notes:
-- `--config-name` applies to all `--source` entries in that command.
 
 ## Packed output format
 `pack` writes:
@@ -110,4 +126,3 @@ Outputs (under `out/`):
 - Zstandard compression defaults to level 3 for speed (override with `GAMMA7B_ZSTD_LEVEL`).
 - `faiss-gpu` requires a CUDA-capable environment; if unavailable, logs will show GPU enablement failed and the pipeline continues on CPU.
 - Control progress logging cadence with `GAMMA7B_LOG_EVERY` (default: 300 records).
-- FineWeb-2 requires an explicit config (default `eng_Latn`); override with `--config-name` or list with `hf-configs`.

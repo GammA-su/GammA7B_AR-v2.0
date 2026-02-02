@@ -1,0 +1,16 @@
+datasets>=2.18
+zstandard>=0.22
+pyyaml>=6.0
+numpy<2.0,>=1.26
+tokenizers>=0.15
+typer>=0.9
+tqdm>=4.66
+rich>=13.7
+faiss-gpu
+
+[dev]
+pytest>=7.4
+pytest-xdist>=3.6
+
+[stackexchange]
+py7zr>=0.20

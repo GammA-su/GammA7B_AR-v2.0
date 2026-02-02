@@ -1,0 +1,35 @@
+[project]
+name = "gamma7b-data"
+version = "0.2.0"
+description = "GammA-7B Stage A data pipeline"
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+  "datasets>=2.18",
+  "zstandard>=0.22",
+  "pyyaml>=6.0",
+  "numpy>=1.26,<2.0",
+  "tokenizers>=0.15",
+  "typer>=0.9",
+  "tqdm>=4.66",
+  "rich>=13.7",
+  "faiss-gpu",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "pytest-xdist>=3.6"]
+stackexchange = ["py7zr>=0.20"]
+
+[project.scripts]
+gamma7b-data = "gamma7b_data.cli:app"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["gamma7b_data*"]
+
+[tool.pytest.ini_options]
+addopts = "-n 16 --dist=loadfile"

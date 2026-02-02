@@ -1,0 +1,2 @@
+[console_scripts]
+gamma7b-data = gamma7b_data.cli:app

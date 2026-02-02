@@ -1,0 +1,157 @@
+seed: 1234
+chars_per_token: 4.0
+
+outputs:
+  raw_dir: data/raw
+  normalized_dir: data/normalized
+  dedup_dir: data/dedup
+  packed_dir: data/packed
+
+dedup:
+  mode: both
+  scope: global
+  simhash_threshold: 3
+  hash_bits: 64
+
+packing:
+  seq_len: 4096
+  tokenizer_path: /path/to/tokenizer.json
+  # num_seqs can be set here or provided via CLI
+  # num_seqs: 100000
+
+domains:
+  filtered_web:
+    weight: 0.30
+    sources:
+      fineweb2:
+        weight: 1.0
+        type: hf_stream
+        params:
+          dataset: HuggingFaceFW/fineweb-2
+          split: train
+          text_field: text
+          id_field: id
+          paths:
+            - data/normalized/filtered_web/fineweb2/*.jsonl.zst
+
+  books_longform:
+    weight: 0.18
+    sources:
+      openstax-text:
+        weight: 0.5
+        type: hf_stream
+        params:
+          dataset: crumb/openstax-text
+          split: train
+          text_field: text
+          id_field: id
+          paths:
+            - data/normalized/books_longform/openstax-text/*.jsonl.zst
+      gutenberg_clean_en:
+        weight: 0.5
+        type: hf_stream
+        params:
+          dataset: nikolina-p/gutenberg_clean_en
+          split: train
+          text_field: text
+          id_field: id
+          paths:
+            - data/normalized/books_longform/gutenberg_clean_en/*.jsonl.zst
+      open-text-books:
+        weight: 0.0
+        type: hf_stream
+        params:
+          dataset: izumi-lab/open-text-books
+          split: train
+          text_field: text
+          id_field: id
+          paths:
+            - data/normalized/books_longform/open-text-books/*.jsonl.zst
+
+  reference:
+    weight: 0.08
+    sources:
+      wikipedia:
+        weight: 1.0
+        type: local_dir
+        params:
+          paths:
+            - data/normalized/reference/wikipedia/*.jsonl.zst
+
+  forums_qa:
+    weight: 0.10
+    sources:
+      stackexchange:
+        weight: 1.0
+        type: local_dir
+        params:
+          paths:
+            - data/normalized/forums_qa/stackexchange/*.jsonl.zst
+
+  code_docs:
+    weight: 0.18
+    sources:
+      the-stack-v2:
+        weight: 0.6
+        type: hf_stream
+        params:
+          dataset: bigcode/the-stack-v2
+          split: train
+          text_field: content
+          id_field: id
+          paths:
+            - data/normalized/code_docs/the-stack-v2/*.jsonl.zst
+      starcoder2data-extras:
+        weight: 0.4
+        type: hf_stream
+        params:
+          dataset: bigcode/starcoder2data-extras
+          split: train
+          text_field: content
+          id_field: id
+          paths:
+            - data/normalized/code_docs/starcoder2data-extras/*.jsonl.zst
+
+  math:
+    weight: 0.12
+    sources:
+      open-web-math:
+        weight: 1.0
+        type: hf_stream
+        params:
+          dataset: open-web-math/open-web-math
+          split: train
+          text_field: text
+          id_field: id
+          paths:
+            - data/normalized/math/open-web-math/*.jsonl.zst
+      proof-pile-2:
+        weight: 0.0
+        type: local_dir
+        params:
+          paths:
+            - data/normalized/math/proof-pile-2/*.jsonl.zst
+
+  tutorials_notebooks:
+    weight: 0.02
+    sources:
+      tutorials_local:
+        weight: 1.0
+        type: local_dir
+        params:
+          paths:
+            - data/normalized/tutorials_notebooks/tutorials_local/*.jsonl.zst
+
+  paper_teasers:
+    weight: 0.02
+    sources:
+      arxiv-abstracts-2021:
+        weight: 1.0
+        type: hf_stream
+        params:
+          dataset: gfissore/arxiv-abstracts-2021
+          split: train
+          text_field: abstract
+          id_field: id
+          paths:
+            - data/normalized/paper_teasers/arxiv-abstracts-2021/*.jsonl.zst
