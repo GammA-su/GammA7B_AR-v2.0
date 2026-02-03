@@ -1,0 +1,89 @@
+seed: 1234
+outputs:
+  raw_dir: data/raw
+  normalized_dir: data/normalized
+  dedup_dir: data/dedup
+  packed_dir: data/packed
+
+chars_per_token: 4.0
+
+packing:
+  seq_len: 4096
+
+domains:
+  filtered_web:
+    weight: 0.30
+    sources:
+      fineweb_edu_default:
+        weight: 1.0
+        type: local_dir
+        paths:
+          - "data/normalized/filtered_web/fineweb_edu_default/*.jsonl.zst"
+
+  books_longform:
+    weight: 0.18
+    sources:
+      openstax_text:
+        weight: 0.50
+        type: local_dir
+        paths:
+          - "data/normalized/books_longform/openstax-text/*.jsonl.zst"
+      gutenberg_clean_en:
+        weight: 0.50
+        type: local_dir
+        paths:
+          - "data/normalized/books_longform/gutenberg_clean_en/*.jsonl.zst"
+
+  reference:
+    weight: 0.08
+    sources:
+      wikipedia:
+        weight: 1.0
+        type: local_dir
+        paths:
+          - "data/normalized/reference/wikipedia/*.jsonl.zst"
+
+  forums_qa:
+    weight: 0.10
+    sources:
+      stackexchange:
+        weight: 1.0
+        type: local_dir
+        paths:
+          - "data/normalized/forums_qa/stackexchange/*.jsonl.zst"
+
+  code_docs:
+    weight: 0.18
+    sources:
+      the_stack_v2:
+        weight: 1.0
+        type: local_dir
+        paths:
+          - "data/normalized/code_docs/the-stack-v2/*.jsonl.zst"
+
+  math:
+    weight: 0.12
+    sources:
+      math_solutions:
+        weight: 1.0
+        type: local_dir
+        paths:
+          - "data/normalized/math/*/*.jsonl.zst"
+
+  tutorials_notebooks:
+    weight: 0.02
+    sources:
+      tutorials_local_trunc12k:
+        weight: 1.0
+        type: local_dir
+        paths:
+          - "data/normalized/tutorials_notebooks/tutorials_local/*.jsonl.zst"
+
+  paper_teasers:
+    weight: 0.02
+    sources:
+      paper_teasers:
+        weight: 1.0
+        type: local_dir
+        paths:
+          - "data/normalized/paper_teasers/*/*.jsonl.zst"

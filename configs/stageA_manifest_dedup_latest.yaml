@@ -1,0 +1,37 @@
+# Minimal manifest for packing the already-mixed + deduped Stage A corpus.
+# Assumes you create a symlink:
+#   $GAMMA7B_DATA_ROOT/dedup/stageA_latest -> <timestamped dedup folder>
+#
+# Pack reads from:
+#   $GAMMA7B_DATA_ROOT/dedup/stageA_latest/deduped.jsonl.zst
+
+seed: 1234
+
+outputs:
+  raw_dir: data/raw
+  normalized_dir: data/normalized
+  dedup_dir: data/dedup
+  packed_dir: data/packed
+
+dedup:
+  mode: exact
+  scope: per-source
+  simhash_threshold: 3
+  hash_bits: 64
+
+packing:
+  seq_len: 4096
+  tokenizer_path: ${TOKENIZER_JSON}
+
+chars_per_token: 4.0
+
+domains:
+  stageA_deduped:
+    weight: 1.0
+    sources:
+      stageA_latest:
+        weight: 1.0
+        type: local_dir
+        params:
+          paths:
+            - data/dedup/stageA_latest/deduped.jsonl.zst

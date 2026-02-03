@@ -23,16 +23,17 @@ domains:
   filtered_web:
     weight: 0.30
     sources:
-      fineweb2:
+      fineweb_edu_default:
         weight: 1.0
         type: hf_stream
         params:
-          dataset: HuggingFaceFW/fineweb-2
+          dataset: HuggingFaceFW/fineweb-edu
+          config_name: default
           split: train
           text_field: text
           id_field: id
           paths:
-            - data/normalized/filtered_web/fineweb2/*.jsonl.zst
+            - data/normalized/filtered_web/fineweb_edu_default/*.jsonl.zst
 
   books_longform:
     weight: 0.18
@@ -106,6 +107,7 @@ domains:
         type: hf_stream
         params:
           dataset: bigcode/starcoder2data-extras
+          config_name: documentation
           split: train
           text_field: content
           id_field: id

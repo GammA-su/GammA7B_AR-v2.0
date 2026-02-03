@@ -1,16 +1,20 @@
-from gamma7b_data.cli import hf_configs_cmd
+from gamma7b_data.hf_configs import filter_hf_configs
 
 
-def test_hf_configs_filter(monkeypatch, capsys):
-    import datasets
+def test_hf_configs_filter_lang_prefix():
+    configs = ["asm_Beng", "fra_Latn", "eng_Latn", "eng_Cyrl"]
+    assert filter_hf_configs(configs, lang="eng") == ["eng_Latn", "eng_Cyrl"]
 
-    def fake_configs(_dataset):
-        return ["eng_Latn", "fra_Latn", "deu_Latn"]
 
-    monkeypatch.setattr(datasets, "get_dataset_config_names", fake_configs)
+def test_hf_configs_filter_lang_script():
+    configs = ["asm_Beng", "fra_Latn", "eng_Latn", "eng_Cyrl"]
+    assert filter_hf_configs(configs, lang="eng", script="Latn") == ["eng_Latn"]
 
-    hf_configs_cmd(dataset="dummy/ds", filter="eng")
-    out = capsys.readouterr().out.strip().splitlines()
 
-    assert out[0] == "eng_Latn"
-    assert out[-1] == "Total configs: 1"
+def test_hf_configs_filter_contains_matches_beng():
+    configs = ["asm_Beng", "fra_Latn", "eng_Latn", "eng_Cyrl"]
+    assert filter_hf_configs(configs, contains="eng") == [
+        "asm_Beng",
+        "eng_Latn",
+        "eng_Cyrl",
+    ]

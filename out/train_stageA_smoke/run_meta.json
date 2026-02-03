@@ -1,0 +1,78 @@
+{
+  "config": {
+    "data": {
+      "mix_2048": 0.55,
+      "mix_4096": 1.0,
+      "mix_8192": 0.1,
+      "pack_2048": null,
+      "pack_4096": "/home/alpahos/satassd/gamma_data_root/packed/stageA_train_small_4096_200kseq_splitmanifest",
+      "pack_8192": null,
+      "tokenizer_model": "/home/alpahos/satassd/gamma_data_root/tokenizers/ultimate_unigram_44032_v1/tokenizer.model",
+      "use_index_domains": true
+    },
+    "model": {
+      "d_model": 4096,
+      "ffn_intermediate": 18432,
+      "global_layers": [
+        5,
+        11,
+        17,
+        23,
+        29,
+        31
+      ],
+      "layers": 32,
+      "n_heads": 32,
+      "n_kv_heads": 8,
+      "qk_norm": true,
+      "qkv_bias": true,
+      "rope_base": 10000.0,
+      "sink_tokens": 64,
+      "swa_window": 4096,
+      "tie_embeddings": true,
+      "vocab_size": 44032
+    },
+    "run": {
+      "eval_every": 200,
+      "eval_pack": null,
+      "log_every": 20,
+      "out_dir": "out/train_stageA_smoke",
+      "save_every": 200,
+      "steps": 50
+    },
+    "train": {
+      "causal_frac": 0.95,
+      "domain_prefix_enable": true,
+      "domain_prefix_start_frac": 0.6,
+      "domain_tokens": {
+        "code_docs": "<|code|>",
+        "default": "<|text|>",
+        "math": "<|math|>",
+        "paper_teasers": "<|paper|>"
+      },
+      "ema_decay": 0.999,
+      "ema_enable": true,
+      "ema_start_frac": 0.9,
+      "fim_frac": 0.05,
+      "grad_accum": 4,
+      "grad_clip": 1.0,
+      "logit_softcap": 30.0,
+      "lr": 0.0003,
+      "micro_batch": 1,
+      "seed": 1234,
+      "skip_grad_mult": 5.0,
+      "skip_spike_sigma": 6.0,
+      "stable_frac": 0.8,
+      "warmup_frac": 0.015,
+      "weight_decay_end": 0.02,
+      "weight_decay_start": 0.08,
+      "z_loss": 0.0001
+    }
+  },
+  "contract_hash": "88695927f6093e2c596fb8720e19f5b83cbb065c436adacbacd784beb2112e6e",
+  "created_at": "2026-02-03T20:05:13+0100",
+  "git_commit": "a4ef7abae79bc4dff7d9d595d0af949e4d6f323c",
+  "git_dirty": true,
+  "tokenizer_model_sha256": "2b543f78784de6f3911939dc72807b8323e2d67ff328ee54379cf4ecc6ab3fa5",
+  "world_size": 1
+}

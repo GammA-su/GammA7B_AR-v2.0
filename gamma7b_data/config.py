@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+import glob
+import os
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -92,6 +94,8 @@ def load_manifest(path: Path) -> PipelineConfig:
             s_type = scfg.get("type", "local_dir")
             params = scfg.get("params", {}) or {}
             paths = params.get("paths", [])
+            if not paths and "paths" in scfg:
+                paths = scfg.get("paths", [])
             if isinstance(paths, str):
                 paths = [paths]
             if not paths:
@@ -127,3 +131,22 @@ def load_manifest(path: Path) -> PipelineConfig:
         chars_per_token=chars_per_token,
         domains=domains,
     )
+
+
+def resolve_paths(paths: List[str], data_root: Optional[str] = None) -> List[str]:
+    if not data_root:
+        return list(paths)
+    resolved: List[str] = []
+    for path in paths:
+        if os.path.isabs(path):
+            resolved.append(path)
+        else:
+            resolved.append(str(Path(data_root) / path))
+    return resolved
+
+
+def expand_source_paths(paths: List[str], data_root: Optional[str] = None) -> List[str]:
+    expanded: List[str] = []
+    for pattern in resolve_paths(paths, data_root=data_root):
+        expanded.extend(glob.glob(pattern))
+    return sorted({path for path in expanded})

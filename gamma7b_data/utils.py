@@ -178,20 +178,35 @@ def open_zst_reader(path: Path):
 
 
 @contextmanager
-def open_zst_writer(path: Path, level: Optional[int] = None):
+def open_zst_writer(path: Path, level: Optional[int] = None, threads: Optional[int] = None):
     if level is None:
         try:
             level = int(os.getenv("GAMMA7B_ZSTD_LEVEL", "3"))
         except ValueError:
             level = 3
     with path.open("wb") as fh:
-        cctx = zstd.ZstdCompressor(level=level)
+        if threads is not None and threads > 0:
+            cctx = zstd.ZstdCompressor(level=level, threads=threads)
+        else:
+            cctx = zstd.ZstdCompressor(level=level)
         with cctx.stream_writer(fh) as writer:
             yield writer
 
 
 def _is_zst(path: Path) -> bool:
     return path.suffix == ".zst" or path.name.endswith(".jsonl.zst")
+
+
+try:
+    import orjson  # type: ignore
+except Exception:
+    orjson = None
+
+
+def _json_loads(line: str) -> Dict:
+    if orjson is not None:
+        return orjson.loads(line)
+    return json.loads(line)
 
 
 def read_jsonl(path: Path) -> Iterator[Dict]:
@@ -203,13 +218,13 @@ def read_jsonl(path: Path) -> Iterator[Dict]:
             for line in text_stream:
                 if not line:
                     continue
-                yield json.loads(line)
+                yield _json_loads(line)
     else:
         with path.open("r", encoding="utf-8") as f:
             for line in f:
                 if not line:
                     continue
-                yield json.loads(line)
+                yield _json_loads(line)
 
 
 def write_jsonl(path: Path, rows: Iterable[Dict]) -> None:

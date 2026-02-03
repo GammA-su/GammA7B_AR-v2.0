@@ -5,43 +5,8 @@ from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Optional, Tuple
 
 import numpy as np
-from tokenizers import Tokenizer
 
-
-class HFTokenizer:
-    def __init__(self, tokenizer_path: Path, eos_token: Optional[str] = None, eos_id: Optional[int] = None):
-        self.tokenizer_path = str(tokenizer_path)
-        self.tokenizer = Tokenizer.from_file(self.tokenizer_path)
-        if eos_id is None:
-            if eos_token is None:
-                eos_token = "<eos>"
-            eos_id = self.tokenizer.token_to_id(eos_token)
-            if eos_id is None:
-                for fallback in ["</s>", "<|endoftext|>"]:
-                    eos_id = self.tokenizer.token_to_id(fallback)
-                    if eos_id is not None:
-                        break
-        if eos_id is None:
-            raise ValueError("Unable to resolve eos_id from tokenizer")
-        self._eos_id = int(eos_id)
-
-    def encode(self, text: str) -> List[int]:
-        return self.tokenizer.encode(text).ids
-
-    @property
-    def eos_id(self) -> int:
-        return self._eos_id
-
-    @property
-    def name(self) -> str:
-        return self.tokenizer_path
-
-
-def load_tokenizer(tokenizer_path: str, eos_token: Optional[str] = None, eos_id: Optional[int] = None) -> HFTokenizer:
-    path = Path(tokenizer_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Tokenizer not found: {tokenizer_path}")
-    return HFTokenizer(path, eos_token=eos_token, eos_id=eos_id)
+from .tokenization import TokenizerWrapper, load_tokenizer
 
 
 @dataclass
@@ -51,7 +16,7 @@ class PackedSequence:
 
 
 class PackBuilder:
-    def __init__(self, seq_len: int, tokenizer: HFTokenizer):
+    def __init__(self, seq_len: int, tokenizer: TokenizerWrapper):
         self.seq_len = seq_len
         self.tokenizer = tokenizer
         self.buffer: List[int] = []
@@ -147,4 +112,3 @@ def write_memmap(path: Path, sequences: Iterable[List[int]], num_sequences: int,
 
 def default_created_at() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-

@@ -1,0 +1,99 @@
+seed: 1234
+chars_per_token: 4.0
+
+outputs:
+  raw_dir: data/raw
+  normalized_dir: data/normalized
+  dedup_dir: data/dedup
+  packed_dir: data/packed
+
+dedup:
+  mode: exact
+  scope: per-source
+  simhash_threshold: 3
+  hash_bits: 64
+
+packing:
+  seq_len: 4096
+  tokenizer_path: ${TOKENIZER_JSON}
+
+domains:
+  filtered_web:
+    weight: 0.3
+    sources:
+      split:
+        weight: 1.0
+        type: local_dir
+        params:
+          paths:
+            - "data/dedup/stageA_latest_split_by_domain/filtered_web.jsonl.zst"
+
+  books_longform:
+    weight: 0.18
+    sources:
+      split:
+        weight: 1.0
+        type: local_dir
+        params:
+          paths:
+            - "data/dedup/stageA_latest_split_by_domain/books_longform.jsonl.zst"
+
+  reference:
+    weight: 0.08
+    sources:
+      split:
+        weight: 1.0
+        type: local_dir
+        params:
+          paths:
+            - "data/dedup/stageA_latest_split_by_domain/reference.jsonl.zst"
+
+  forums_qa:
+    weight: 0.1
+    sources:
+      split:
+        weight: 1.0
+        type: local_dir
+        params:
+          paths:
+            - "data/dedup/stageA_latest_split_by_domain/forums_qa.jsonl.zst"
+
+  code_docs:
+    weight: 0.18
+    sources:
+      split:
+        weight: 1.0
+        type: local_dir
+        params:
+          paths:
+            - "data/dedup/stageA_latest_split_by_domain/code_docs.jsonl.zst"
+
+  math:
+    weight: 0.12
+    sources:
+      split:
+        weight: 1.0
+        type: local_dir
+        params:
+          paths:
+            - "data/dedup/stageA_latest_split_by_domain/math.jsonl.zst"
+
+  tutorials_notebooks:
+    weight: 0.02
+    sources:
+      split:
+        weight: 1.0
+        type: local_dir
+        params:
+          paths:
+            - "data/dedup/stageA_latest_split_by_domain/tutorials_notebooks.jsonl.zst"
+
+  paper_teasers:
+    weight: 0.02
+    sources:
+      split:
+        weight: 1.0
+        type: local_dir
+        params:
+          paths:
+            - "data/dedup/stageA_latest_split_by_domain/paper_teasers.jsonl.zst"

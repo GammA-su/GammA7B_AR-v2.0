@@ -1,3 +1,5 @@
+import datetime
+import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -5,6 +7,11 @@ from .filters import apply_filters, build_default_filters
 from .manifest import ShardManifest
 from .schema import NormalizedDocument
 from .utils import estimate_tokens, iter_files, open_zst_writer, read_jsonl, stable_hash, stable_shard_name
+
+try:
+    import orjson  # type: ignore
+except Exception:
+    orjson = None
 
 
 def _stable_doc_id(source: str, text: str, fallback: str = "") -> str:
@@ -52,6 +59,72 @@ def normalize_record(
     )
 
 
+def _normalize_single_file(
+    path: Path,
+    out_dir: Path,
+    domain: str,
+    source: str,
+    seed: int,
+    shard_size: int,
+    license_tag: Optional[str],
+    use_language_heuristic: bool,
+    chars_per_token: float,
+    file_index: int,
+) -> Tuple[List[Path], int, int, int]:
+    filters = build_default_filters(use_language_heuristic=use_language_heuristic)
+    shard_paths: List[Path] = []
+    shard_idx = 0
+    buffer: List[bytes] = []
+    manifest = ShardManifest(
+        shard_path=str(out_dir / stable_shard_name("shard", file_index * 1_000_000 + shard_idx)),
+        domain=domain,
+        source=source,
+        seed=seed,
+    )
+
+    def flush() -> None:
+        nonlocal shard_idx, buffer, manifest
+        if not buffer:
+            return
+        shard_path = out_dir / stable_shard_name("shard", file_index * 1_000_000 + shard_idx)
+        manifest.shard_path = str(shard_path)
+        with open_zst_writer(shard_path) as writer:
+            for item in buffer:
+                writer.write(item + b"\n")
+        manifest_path = shard_path.with_suffix(".manifest.json")
+        manifest.write(manifest_path)
+        shard_paths.append(shard_path)
+        buffer = []
+        shard_idx += 1
+        manifest = ShardManifest(
+            shard_path=str(out_dir / stable_shard_name("shard", file_index * 1_000_000 + shard_idx)),
+            domain=domain,
+            source=source,
+            seed=seed,
+        )
+
+    processed = 0
+    kept = 0
+    dropped = 0
+    for record in read_jsonl(path):
+        doc = normalize_record(record, domain=domain, source=source, license_tag=license_tag)
+        keep, reason = apply_filters(doc.text, filters)
+        if not keep:
+            manifest.add_drop(reason or "filtered")
+            processed += 1
+            dropped += 1
+            continue
+        est_tokens = estimate_tokens(doc.text, chars_per_token=chars_per_token)
+        manifest.add_doc(doc.text, est_tokens)
+        buffer.append(json_dumps(doc.to_json()))
+        processed += 1
+        kept += 1
+        if len(buffer) >= shard_size:
+            flush()
+    flush()
+    return shard_paths, processed, kept, dropped
+
+
 def normalize_files(
     inputs: List[Path],
     out_dir: Path,
@@ -64,13 +137,81 @@ def normalize_files(
     chars_per_token: float = 4.0,
     logger=None,
     log_every: int = 300,
+    workers: int = 16,
 ) -> List[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     filters = build_default_filters(use_language_heuristic=use_language_heuristic)
 
     shard_paths: List[Path] = []
+    files = list(iter_files(inputs))
+    total_bytes = sum(p.stat().st_size for p in files)
+    bytes_done = 0
+    start_ts = time.time()
+
+    if workers and workers > 1 and len(files) > 1:
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+
+        if logger:
+            logger.info("Normalize parallel: workers=%s files=%s", workers, len(files))
+        processed = 0
+        kept = 0
+        dropped = 0
+        futures = []
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            for file_index, path in enumerate(files):
+                futures.append(
+                    ex.submit(
+                        _normalize_single_file,
+                        path,
+                        out_dir,
+                        domain,
+                        source,
+                        seed,
+                        shard_size,
+                        license_tag,
+                        use_language_heuristic,
+                        chars_per_token,
+                        file_index,
+                    )
+                )
+            done_files = 0
+            for fut in as_completed(futures):
+                paths_out, p, k, d = fut.result()
+                shard_paths.extend(paths_out)
+                processed += p
+                kept += k
+                dropped += d
+                done_files += 1
+                if logger:
+                    logger.info(
+                        "Normalize file done (parallel): %s/%s processed=%s kept=%s dropped=%s",
+                        done_files,
+                        len(futures),
+                        p,
+                        k,
+                        d,
+                    )
+                bytes_done = sum(p.stat().st_size for p in files[:done_files])
+                if total_bytes > 0 and logger:
+                    pct = (bytes_done / total_bytes) * 100.0
+                    elapsed = max(1e-6, time.time() - start_ts)
+                    eta = (elapsed / max(bytes_done, 1)) * (total_bytes - bytes_done)
+                    logger.info(
+                        "Normalize progress (bytes): %.1f%% ETA=%s",
+                        pct,
+                        str(datetime.timedelta(seconds=int(eta))),
+                    )
+        if logger:
+            logger.info(
+                "Normalize complete: processed=%s kept=%s dropped=%s shards=%s",
+                processed,
+                kept,
+                dropped,
+                len(shard_paths),
+            )
+        return shard_paths
     shard_idx = 0
-    buffer: List[str] = []
+    buffer: List[bytes] = []
     manifest = ShardManifest(
         shard_path=str(out_dir / stable_shard_name("shard", shard_idx)),
         domain=domain,
@@ -86,7 +227,7 @@ def normalize_files(
         manifest.shard_path = str(shard_path)
         with open_zst_writer(shard_path) as writer:
             for item in buffer:
-                writer.write((item + "\n").encode("utf-8"))
+                writer.write(item + b"\n")
         manifest_path = shard_path.with_suffix(".manifest.json")
         manifest.write(manifest_path)
         shard_paths.append(shard_path)
@@ -104,9 +245,12 @@ def normalize_files(
     processed = 0
     kept = 0
     dropped = 0
+    total_text_bytes = 0
+    last_logged = 0
+    last_ts = time.time()
     if logger:
         logger.info("Normalize config: shard_size=%s chars_per_token=%.2f", shard_size, chars_per_token)
-    for path in iter_files(inputs):
+    for path in files:
         if logger:
             logger.info("Normalize reading: %s", path)
         file_processed = 0
@@ -132,16 +276,30 @@ def normalize_files(
             est_tokens = estimate_tokens(doc.text, chars_per_token=chars_per_token)
             manifest.add_doc(doc.text, est_tokens)
             buffer.append(json_dumps(doc.to_json()))
+            total_text_bytes += len(doc.text.encode("utf-8", errors="replace"))
             processed += 1
             kept += 1
             file_processed += 1
             file_kept += 1
             if logger and processed % log_every == 0:
+                now = time.time()
+                elapsed = max(1e-6, now - start_ts)
+                avg_bytes_per_doc = total_text_bytes / max(1, processed)
+                est_total_docs = int((total_bytes * 2.0) / max(1.0, avg_bytes_per_doc))
+                est_total_docs = max(processed, est_total_docs)
+                rate = (processed - last_logged) / max(1e-6, now - last_ts)
+                remaining = max(0, est_total_docs - processed)
+                eta = int(remaining / max(1e-6, rate))
+                pct = (processed / max(1, est_total_docs)) * 100.0
+                last_logged = processed
+                last_ts = now
                 logger.info(
-                    "Normalize progress: processed=%s kept=%s dropped=%s",
+                    "Normalize progress: processed=%s kept=%s dropped=%s pct~=%.1f%% ETA~=%s",
                     processed,
                     kept,
                     dropped,
+                    pct,
+                    str(datetime.timedelta(seconds=eta)),
                 )
             if len(buffer) >= shard_size:
                 flush()
@@ -153,13 +311,25 @@ def normalize_files(
                 file_kept,
                 file_dropped,
             )
+        bytes_done += path.stat().st_size
+        if total_bytes > 0 and logger:
+            pct = (bytes_done / total_bytes) * 100.0
+            elapsed = max(1e-6, time.time() - start_ts)
+            eta = (elapsed / max(bytes_done, 1)) * (total_bytes - bytes_done)
+            logger.info(
+                "Normalize progress (bytes): %.1f%% ETA=%s",
+                pct,
+                str(datetime.timedelta(seconds=int(eta))),
+            )
     flush()
     if logger:
         logger.info("Normalize complete: processed=%s kept=%s dropped=%s shards=%s", processed, kept, dropped, len(shard_paths))
     return shard_paths
 
 
-def json_dumps(payload: Dict) -> str:
+def json_dumps(payload: Dict) -> bytes:
     import json
 
-    return json.dumps(payload, ensure_ascii=False)
+    if orjson is not None:
+        return orjson.dumps(payload)
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8")

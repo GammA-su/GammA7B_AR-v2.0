@@ -28,9 +28,10 @@ Edit `stageA_manifest.yaml` (or `configs/stageA_manifest.yaml`) with your paths 
 All commands are deterministic given `--seed`.
 
 ```
-python -m gamma7b_data.cli hf-configs --dataset HuggingFaceFW/fineweb-2 --filter eng
+python -m gamma7b_data.cli hf-configs --dataset HuggingFaceFW/fineweb-2 --lang eng --script Latn
 python -m gamma7b_data.cli hf-stream --source fineweb2 --out-dir data/normalized
 python -m gamma7b_data.cli hf-stream --source fineweb2 --config-name eng_Latn --out-dir data/normalized
+python -m gamma7b_data.cli ingest-manifest --manifest configs/stageA_manifest.yaml --out-dir out/stageA_raw
 python -m gamma7b_data.cli ingest-wikipedia --input /path/to/wikiextractor --out-dir data/normalized
 python -m gamma7b_data.cli ingest-stackexchange --input /path/to/Posts.xml --out-dir data/normalized
 
@@ -54,6 +55,27 @@ python -m gamma7b_data.cli report \
   --input data/normalized/**/**/*.manifest.json \
   --out data/report.json
 ```
+> WARNING: Substring filtering (e.g. `--contains eng` / `--filter eng`) can match "Beng" (e.g. `asm_Beng`). Prefer `--lang eng` for language-aware matching.
+
+## Recommended web backbone
+- Use FineWeb-Edu for English web data.
+- Use FineWeb-2 when you need multilingual expansion.
+
+Canonical Stage-A ingestion:
+```
+uv run python -m gamma7b_data.cli ingest-manifest --manifest configs/stageA_manifest.yaml --out-dir out/stageA_raw
+```
+
+Fast dedup (per-source + single-pass near):
+```
+uv run python -m gamma7b_data.cli dedup \
+  --input data/normalized/**/**/*.jsonl.zst \
+  --out-dir data/dedup \
+  --mode both \
+  --scope per-source \
+  --near-selection first
+```
+
 Global flags:
 - `--cpu-threads 16` (default)
 - `--faiss-gpu 1` (default GPU device to probe/use)
