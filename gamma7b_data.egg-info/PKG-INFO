@@ -4,7 +4,9 @@ Version: 0.2.0
 Summary: GammA-7B Stage A data pipeline
 Requires-Python: <3.11,>=3.10
 Description-Content-Type: text/markdown
-Requires-Dist: datasets>=2.18
+Requires-Dist: datasets>=2.19
+Requires-Dist: huggingface_hub>=0.23
+Requires-Dist: hf_transfer>=0.1.8
 Requires-Dist: zstandard>=0.22
 Requires-Dist: pyyaml>=6.0
 Requires-Dist: numpy<2.0,>=1.26
@@ -78,6 +80,11 @@ python -m gamma7b_data.cli report \
 ```
 > WARNING: Substring filtering (e.g. `--contains eng` / `--filter eng`) can match "Beng" (e.g. `asm_Beng`). Prefer `--lang eng` for language-aware matching.
 
+Schema probe (streaming one row to confirm `text_field`/`id_field`):
+```
+uv run python -c "from datasets import load_dataset; row=next(iter(load_dataset('teven/stackexchange', split='train', streaming=True))); print(sorted(row.keys()))"
+```
+
 ## Recommended web backbone
 - Use FineWeb-Edu for English web data.
 - Use FineWeb-2 when you need multilingual expansion.
@@ -87,9 +94,19 @@ Canonical Stage-A ingestion:
 uv run python -m gamma7b_data.cli ingest-manifest --manifest configs/stageA_manifest.yaml --out-dir out/stageA_raw
 ```
 
+Fast dedup (per-source + single-pass near):
+```
+uv run python -m gamma7b_data.cli dedup \
+  --input data/normalized/**/**/*.jsonl.zst \
+  --out-dir data/dedup \
+  --mode both \
+  --scope per-source \
+  --near-selection first
+```
+
 Global flags:
 - `--cpu-threads 16` (default)
-- `--faiss-gpu 1` (default GPU device to probe/use)
+- `--faiss-gpu 0` (default; 0 disables FAISS GPU probing)
 - `--verbose`
 - `--log-every 300` (default progress cadence)
 
@@ -119,6 +136,47 @@ If you need StackExchange `.7z` ingestion:
 uv pip install -e ".[stackexchange]"
 ```
 
+## Fresh machine (no data) - Stage A end-to-end
+```bash
+export WORKSPACE=/workspace
+export HF_HOME="$WORKSPACE/.cache/huggingface"
+export HF_DATASETS_CACHE="$HF_HOME/datasets"
+export HF_HUB_CACHE="$HF_HOME/hub"
+export XDG_CACHE_HOME="$WORKSPACE/.cache"
+export TMPDIR="$WORKSPACE/tmp"
+mkdir -p "$HF_DATASETS_CACHE" "$HF_HUB_CACHE" "$XDG_CACHE_HOME" "$TMPDIR"
+
+cd /workspace/GammA7B_AR-v2.0
+uv sync --extra dev
+
+# Pull all HF sources in configs/stageA_manifest.yaml
+# (includes wikipedia + forums_qa via hf_stream sources).
+uv run python -m gamma7b_data.cli ingest-manifest \
+  --manifest configs/stageA_manifest.yaml \
+  --out-dir "$WORKSPACE/out/stageA_raw"
+
+# If you also have extra local raw JSONL/ZST shards, normalize them:
+# uv run python -m gamma7b_data.cli normalize --input "$WORKSPACE/data/raw/**/*.jsonl.zst" --out-dir "$WORKSPACE/data/normalized" --domain filtered_web --source local_extra
+
+uv run python -m gamma7b_data.cli dedup \
+  --input "$WORKSPACE/data/normalized/**/**/*.jsonl.zst" \
+  --out-dir "$WORKSPACE/data/dedup" \
+  --mode both --scope global
+
+uv run python scripts/32_split_dedup_by_domain.py \
+  --dedup-zst "$WORKSPACE/data/dedup/deduped.jsonl.zst" \
+  --out-dir "$WORKSPACE/data/dedup/stageA_latest_split_by_domain"
+
+uv run python scripts/33_make_split_manifest.py \
+  --out configs/stageA_manifest_dedup_split.yaml \
+  --split-rel data/dedup/stageA_latest_split_by_domain
+
+uv run python -m gamma7b_data.cli pack \
+  --manifest configs/stageA_manifest_dedup_split.yaml \
+  --out-dir "$WORKSPACE/data/packed" \
+  --num-seqs 1000
+```
+
 ## Run tests
 ```
 uv run pytest -q
@@ -139,7 +197,7 @@ Outputs (under `out/`):
 - Filters are heuristic CPU-only (ASCII ratio + boilerplate + length).
 - Dedup logs decisions with reason codes for auditability.
 - StackExchange `.7z` archives require `uv pip install -e ".[stackexchange]"`.
-- Default runtime uses 16 CPU threads and attempts FAISS GPU on device 1 (see `--cpu-threads` and `--faiss-gpu` flags).
+- Default runtime uses 16 CPU threads and skips FAISS GPU probing unless `--faiss-gpu` is set (see `--cpu-threads` and `--faiss-gpu` flags).
 - Zstandard compression defaults to level 3 for speed (override with `GAMMA7B_ZSTD_LEVEL`).
 - `faiss-gpu` requires a CUDA-capable environment; if unavailable, logs will show GPU enablement failed and the pipeline continues on CPU.
 - Control progress logging cadence with `GAMMA7B_LOG_EVERY` (default: 300 records).

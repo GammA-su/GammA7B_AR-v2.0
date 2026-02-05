@@ -14,7 +14,7 @@ import typer
 
 from .config import expand_source_paths, load_manifest
 from .dedup import Deduper, SimhashClusterer, exact_hash, normalize_for_simhash, simhash_from_normalized
-from .hf_configs import filter_hf_configs
+from .hf_configs import filter_hf_configs, get_hf_dataset_config_names
 from .hf_stream import HF_SOURCE_MAP, stream_hf_dataset_to_normalized, stream_hf_to_normalized
 from .manifest import PackManifest
 from .normalize import normalize_files
@@ -153,16 +153,24 @@ def _repair_worker(args):
 
 @app.callback()
 def main(
+    ctx: typer.Context,
     verbose: bool = typer.Option(False, "--verbose"),
     cpu_threads: int = typer.Option(16, "--cpu-threads"),
-    faiss_gpu: int = typer.Option(1, "--faiss-gpu"),
+    faiss_gpu: int = typer.Option(0, "--faiss-gpu", help="FAISS GPU device id (0 disables)."),
     log_every: int = typer.Option(300, "--log-every"),
 ) -> None:
     import os
 
     os.environ["GAMMA7B_LOG_EVERY"] = str(max(1, int(log_every)))
     logger = setup_logger(verbose=verbose)
-    initialize_runtime(logger, cpu_threads=cpu_threads, faiss_gpu_device=faiss_gpu)
+    subcommand = (ctx.invoked_subcommand or "").strip().lower()
+    needs_faiss = subcommand in {"dedup", "smoke"}
+    initialize_runtime(
+        logger,
+        cpu_threads=cpu_threads,
+        faiss_gpu_device=faiss_gpu,
+        enable_faiss=needs_faiss,
+    )
 
 
 @app.command("hf-configs")
@@ -173,12 +181,22 @@ def hf_configs_cmd(
     contains: Optional[str] = typer.Option(None, "--contains", help="Substring filter"),
     filter: Optional[str] = typer.Option(None, "--filter", help="Deprecated: use --contains"),
 ) -> None:
-    from datasets import get_dataset_config_names
-
-    configs = get_dataset_config_names(dataset)
     if contains is None and filter is not None:
         contains = filter
-    configs = filter_hf_configs(configs, lang=lang, script=script, contains=contains)
+    configs, note = get_hf_dataset_config_names(dataset)
+    resolved_configs = list(configs)
+    configs = filter_hf_configs(resolved_configs, lang=lang, script=script, contains=contains)
+    if note:
+        typer.secho(f"Note: {note}", fg=typer.colors.YELLOW, err=True)
+    if resolved_configs and not configs:
+        typer.secho(
+            (
+                "Warning: dataset '{dataset}' resolved configs but filtering removed all results "
+                "(lang={lang}, script={script})."
+            ).format(dataset=dataset, lang=lang, script=script),
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
     for cfg in configs:
         typer.echo(cfg)
     typer.echo(f"Total configs: {len(configs)}")
@@ -192,6 +210,8 @@ def hf_stream(
     limit: Optional[int] = typer.Option(None, "--limit"),
     split: Optional[str] = typer.Option(None, "--split"),
     config_name: Optional[str] = typer.Option(None, "--config-name"),
+    max_retries: int = typer.Option(5, "--max-retries", help="Retry HF stream failures this many times."),
+    retry_wait: float = typer.Option(1.0, "--retry-wait", help="Seconds to wait between retries."),
     seed: int = typer.Option(0, "--seed"),
 ) -> None:
     _ = seed
@@ -214,6 +234,8 @@ def hf_stream(
             limit=limit,
             split=split,
             config_name=config_name,
+            max_retries=max_retries,
+            retry_wait=retry_wait,
             logger=logger,
             log_every=log_every,
         )
@@ -1071,7 +1093,13 @@ def _read_first_jsonl_line(path: Path) -> Dict[str, object]:
     return {"status": "ok", "line": line}
 
 
-def _audit_manifest_local(cfg, strict: bool, logger=None, data_root: Optional[str] = None) -> Dict[str, object]:
+def _audit_manifest_local(
+    cfg,
+    strict: bool,
+    logger=None,
+    data_root: Optional[str] = None,
+    include_hf_stream: bool = False,
+) -> Dict[str, object]:
     report = {
         "sources": [],
         "total_files": 0,
@@ -1085,7 +1113,9 @@ def _audit_manifest_local(cfg, strict: bool, logger=None, data_root: Optional[st
         domain = cfg.domains[domain_name]
         for source_name in sorted(domain.sources.keys()):
             source = domain.sources[source_name]
-            if source.type not in {"local_dir", "local_jsonl"}:
+            if source.type not in {"local_dir", "local_jsonl"} and not (
+                include_hf_stream and source.type == "hf_stream"
+            ):
                 continue
             if source.weight <= 0:
                 continue
@@ -1116,22 +1146,25 @@ def _audit_manifest_local(cfg, strict: bool, logger=None, data_root: Optional[st
                         )
                     elif probe["status"] == "ok":
                         obj = json.loads(probe["line"])
-                        placeholder_reason = None
-                        if obj.get("license_tag") == "placeholder":
-                            placeholder_reason = "license_tag"
-                        elif obj.get("meta", {}).get("note") == "placeholder":
-                            placeholder_reason = "meta.note"
-                        elif "placeholder" in str(obj.get("text", "")).lower():
-                            placeholder_reason = "text"
-                        if placeholder_reason:
-                            report["placeholders"].append(
-                                {
-                                    "domain": domain.name,
-                                    "source": source.name,
-                                    "path": first_path,
-                                    "reason": placeholder_reason,
-                                }
-                            )
+                        if isinstance(obj, dict):
+                            placeholder_reason = None
+                            if obj.get("license_tag") == "placeholder":
+                                placeholder_reason = "license_tag"
+                            else:
+                                meta = obj.get("meta")
+                                if isinstance(meta, dict) and meta.get("note") == "placeholder":
+                                    placeholder_reason = "meta.note"
+                            if placeholder_reason is None and "placeholder" in str(obj.get("text", "")).lower():
+                                placeholder_reason = "text"
+                            if placeholder_reason:
+                                report["placeholders"].append(
+                                    {
+                                        "domain": domain.name,
+                                        "source": source.name,
+                                        "path": first_path,
+                                        "reason": placeholder_reason,
+                                    }
+                                )
                 except Exception as exc:
                     report["probe_errors"].append(
                         {
@@ -1173,7 +1206,13 @@ def manifest_audit_cmd(
     except Exception:
         raw_domain_weights = {}
     resolved_root = _resolve_data_root(data_root)
-    report = _audit_manifest_local(cfg, strict=False, logger=logger, data_root=resolved_root)
+    report = _audit_manifest_local(
+        cfg,
+        strict=False,
+        logger=logger,
+        data_root=resolved_root,
+        include_hf_stream=True,
+    )
     manifest_text = manifest.read_text(encoding="utf-8")
     report["manifest_hash"] = stable_hash(manifest_text)
     report["manifest_path"] = str(manifest)

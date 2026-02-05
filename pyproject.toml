@@ -5,7 +5,9 @@ description = "GammA-7B Stage A data pipeline"
 readme = "README.md"
 requires-python = ">=3.10,<3.11"
 dependencies = [
-  "datasets>=2.18",
+  "datasets>=2.19",
+  "huggingface_hub>=0.23",
+  "hf_transfer>=0.1.8",
   "zstandard>=0.22",
   "pyyaml>=6.0",
   "numpy>=1.26,<2.0",
@@ -29,7 +31,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["gamma7b_data*"]
+include = ["gamma7b_data*", "gamma7b_train*"]
 
 [tool.pytest.ini_options]
 addopts = "-n 16 --dist=loadfile"

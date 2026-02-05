@@ -125,6 +125,192 @@ def _normalize_single_file(
     return shard_paths, processed, kept, dropped
 
 
+def _normalize_records_chunk(
+    records: List[Dict],
+    domain: str,
+    source: str,
+    license_tag: Optional[str],
+    use_language_heuristic: bool,
+    chars_per_token: float,
+) -> Tuple[List[Tuple[bytes, int, int]], int, int, int, Dict[str, int], int]:
+    filters = build_default_filters(use_language_heuristic=use_language_heuristic)
+    kept_rows: List[Tuple[bytes, int, int]] = []
+    processed = 0
+    kept = 0
+    dropped = 0
+    drops: Dict[str, int] = {}
+    total_text_bytes = 0
+    for record in records:
+        doc = normalize_record(record, domain=domain, source=source, license_tag=license_tag)
+        keep, reason = apply_filters(doc.text, filters)
+        processed += 1
+        if not keep:
+            dropped += 1
+            key = reason or "filtered"
+            drops[key] = drops.get(key, 0) + 1
+            continue
+        est_tokens = estimate_tokens(doc.text, chars_per_token=chars_per_token)
+        text_bytes = len(doc.text.encode("utf-8", errors="replace"))
+        kept_rows.append((json_dumps(doc.to_json()), text_bytes, est_tokens))
+        total_text_bytes += text_bytes
+        kept += 1
+    return kept_rows, processed, kept, dropped, drops, total_text_bytes
+
+
+def _normalize_single_file_parallel(
+    path: Path,
+    out_dir: Path,
+    domain: str,
+    source: str,
+    seed: int,
+    shard_size: int,
+    license_tag: Optional[str],
+    use_language_heuristic: bool,
+    chars_per_token: float,
+    file_index: int,
+    workers: int,
+    chunk_size: int,
+    logger=None,
+    log_every: int = 300,
+) -> Tuple[List[Path], int, int, int]:
+    shard_paths: List[Path] = []
+    shard_idx = 0
+    buffer: List[bytes] = []
+    manifest = ShardManifest(
+        shard_path=str(out_dir / stable_shard_name("shard", file_index * 1_000_000 + shard_idx)),
+        domain=domain,
+        source=source,
+        seed=seed,
+    )
+
+    def flush() -> None:
+        nonlocal shard_idx, buffer, manifest
+        if not buffer:
+            return
+        shard_path = out_dir / stable_shard_name("shard", file_index * 1_000_000 + shard_idx)
+        manifest.shard_path = str(shard_path)
+        with open_zst_writer(shard_path) as writer:
+            for item in buffer:
+                writer.write(item + b"\n")
+        manifest_path = shard_path.with_suffix(".manifest.json")
+        manifest.write(manifest_path)
+        shard_paths.append(shard_path)
+        buffer = []
+        shard_idx += 1
+        manifest = ShardManifest(
+            shard_path=str(out_dir / stable_shard_name("shard", file_index * 1_000_000 + shard_idx)),
+            domain=domain,
+            source=source,
+            seed=seed,
+        )
+        if logger:
+            logger.info("Normalized shard written: %s", shard_path)
+
+    def consume_result(result) -> None:
+        nonlocal processed, kept, dropped, total_text_bytes, last_logged, last_ts
+        rows, p, k, d, drops, text_bytes = result
+        processed += p
+        kept += k
+        dropped += d
+        total_text_bytes += text_bytes
+        for reason, count in drops.items():
+            manifest.drops[reason] = manifest.drops.get(reason, 0) + count
+        for item, bytes_len, est_tokens in rows:
+            manifest.counts["docs"] += 1
+            manifest.counts["bytes"] += bytes_len
+            manifest.counts["est_tokens"] += est_tokens
+            buffer.append(item)
+            if len(buffer) >= shard_size:
+                flush()
+        if logger and processed % log_every == 0:
+            now = time.time()
+            avg_bytes_per_doc = total_text_bytes / max(1, processed)
+            est_total_docs = int((total_bytes * 2.0) / max(1.0, avg_bytes_per_doc))
+            est_total_docs = max(processed, est_total_docs)
+            rate = (processed - last_logged) / max(1e-6, now - last_ts)
+            remaining = max(0, est_total_docs - processed)
+            eta = int(remaining / max(1e-6, rate))
+            pct = (processed / max(1, est_total_docs)) * 100.0
+            last_logged = processed
+            last_ts = now
+            logger.info(
+                "Normalize progress: processed=%s kept=%s dropped=%s pct~=%.1f%% ETA~=%s",
+                processed,
+                kept,
+                dropped,
+                pct,
+                str(datetime.timedelta(seconds=eta)),
+            )
+
+    processed = 0
+    kept = 0
+    dropped = 0
+    total_text_bytes = 0
+    last_logged = 0
+    last_ts = time.time()
+    start_ts = time.time()
+
+    total_bytes = path.stat().st_size
+    if logger:
+        logger.info(
+            "Normalize single-file parallel: %s workers=%s chunk_size=%s shard_size=%s",
+            path,
+            workers,
+            chunk_size,
+            shard_size,
+        )
+
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    futures = []
+    pending_records: List[Dict] = []
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        for record in read_jsonl(path):
+            pending_records.append(record)
+            if len(pending_records) >= chunk_size:
+                futures.append(
+                    ex.submit(
+                        _normalize_records_chunk,
+                        pending_records,
+                        domain,
+                        source,
+                        license_tag,
+                        use_language_heuristic,
+                        chars_per_token,
+                    )
+                )
+                pending_records = []
+                if len(futures) >= workers * 3:
+                    done = next(as_completed(futures))
+                    futures.remove(done)
+                    consume_result(done.result())
+        if pending_records:
+            futures.append(
+                ex.submit(
+                    _normalize_records_chunk,
+                    pending_records,
+                    domain,
+                    source,
+                    license_tag,
+                    use_language_heuristic,
+                    chars_per_token,
+                )
+            )
+        for fut in as_completed(futures):
+            consume_result(fut.result())
+
+    flush()
+    if logger:
+        logger.info(
+            "Normalize complete (parallel single file): processed=%s kept=%s dropped=%s shards=%s",
+            processed,
+            kept,
+            dropped,
+            len(shard_paths),
+        )
+    return shard_paths, processed, kept, dropped
+
+
 def normalize_files(
     inputs: List[Path],
     out_dir: Path,
@@ -201,6 +387,32 @@ def normalize_files(
                         pct,
                         str(datetime.timedelta(seconds=int(eta))),
                     )
+        if logger:
+            logger.info(
+                "Normalize complete: processed=%s kept=%s dropped=%s shards=%s",
+                processed,
+                kept,
+                dropped,
+                len(shard_paths),
+            )
+        return shard_paths
+    if workers and workers > 1 and len(files) == 1:
+        shard_paths, processed, kept, dropped = _normalize_single_file_parallel(
+            path=files[0],
+            out_dir=out_dir,
+            domain=domain,
+            source=source,
+            seed=seed,
+            shard_size=shard_size,
+            license_tag=license_tag,
+            use_language_heuristic=use_language_heuristic,
+            chars_per_token=chars_per_token,
+            file_index=0,
+            workers=workers,
+            chunk_size=max(1000, shard_size),
+            logger=logger,
+            log_every=log_every,
+        )
         if logger:
             logger.info(
                 "Normalize complete: processed=%s kept=%s dropped=%s shards=%s",

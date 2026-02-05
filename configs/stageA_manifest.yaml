@@ -74,8 +74,13 @@ domains:
     sources:
       wikipedia:
         weight: 1.0
-        type: local_dir
+        type: hf_stream
         params:
+          dataset: wikipedia
+          config_name: 20220301.en
+          split: train
+          text_field: text
+          id_field: id
           paths:
             - data/normalized/reference/wikipedia/*.jsonl.zst
 
@@ -84,8 +89,12 @@ domains:
     sources:
       stackexchange:
         weight: 1.0
-        type: local_dir
+        type: hf_stream
         params:
+          dataset: teven/stackexchange
+          split: train
+          text_field: text
+          id_field: id
           paths:
             - data/normalized/forums_qa/stackexchange/*.jsonl.zst
 
@@ -139,8 +148,13 @@ domains:
     sources:
       tutorials_local:
         weight: 1.0
-        type: local_dir
+        type: hf_stream
         params:
+          dataset: codeparrot/github-jupyter-text-code-pairs
+          config_name: default
+          split: train
+          text_field: markdown
+          id_field: path
           paths:
             - data/normalized/tutorials_notebooks/tutorials_local/*.jsonl.zst
 

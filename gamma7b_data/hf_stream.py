@@ -1,5 +1,7 @@
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Iterator, List, Optional, Tuple
+import itertools
+import time
 
 from datasets import load_dataset
 from tqdm import tqdm
@@ -87,6 +89,50 @@ HF_SOURCE_MAP: Dict[str, Dict] = {
 }
 
 
+def _iter_hf_rows_with_retries(
+    dataset_name: str,
+    split: str,
+    config_name: Optional[str],
+    revision: Optional[str],
+    limit: Optional[int],
+    max_retries: int,
+    retry_wait: float,
+    logger=None,
+) -> Iterator[Tuple[int, Dict]]:
+    idx = 0
+    attempt = 0
+    while True:
+        try:
+            if config_name:
+                ds = load_dataset(dataset_name, config_name, split=split, streaming=True, revision=revision)
+            else:
+                ds = load_dataset(dataset_name, split=split, streaming=True, revision=revision)
+            for row in itertools.islice(ds, idx, None):
+                yield idx, row
+                idx += 1
+                if limit is not None and idx >= limit:
+                    return
+            return
+        except ValueError:
+            raise
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:
+            attempt += 1
+            if attempt > max_retries:
+                raise
+            if logger:
+                logger.warning(
+                    "HF stream error (attempt %s/%s): %s; retrying in %.1fs (resume idx=%s)",
+                    attempt,
+                    max_retries,
+                    exc,
+                    retry_wait,
+                    idx,
+                )
+            time.sleep(max(0.0, float(retry_wait)))
+
+
 def stream_hf_dataset_to_normalized(
     dataset_name: str,
     out_path: Path,
@@ -100,6 +146,8 @@ def stream_hf_dataset_to_normalized(
     meta_fields: Optional[List[str]] = None,
     license_tag: Optional[str] = None,
     revision: Optional[str] = None,
+    max_retries: int = 5,
+    retry_wait: float = 1.0,
     logger=None,
     log_every: int = 300,
 ) -> None:
@@ -110,9 +158,9 @@ def stream_hf_dataset_to_normalized(
 
     try:
         if config_name:
-            ds = load_dataset(dataset_name, config_name, split=split, streaming=True, revision=revision)
+            load_dataset(dataset_name, config_name, split=split, streaming=True, revision=revision)
         else:
-            ds = load_dataset(dataset_name, split=split, streaming=True, revision=revision)
+            load_dataset(dataset_name, split=split, streaming=True, revision=revision)
     except ValueError as exc:
         if config_name is None:
             hint = ""
@@ -152,9 +200,17 @@ def stream_hf_dataset_to_normalized(
         )
     total = 0
     with open_zst_writer(out_path) as writer:
-        for idx, row in enumerate(tqdm(ds, desc=f"stream {source}", unit="docs")):
-            if limit is not None and idx >= limit:
-                break
+        rows = _iter_hf_rows_with_retries(
+            dataset_name=dataset_name,
+            split=split,
+            config_name=config_name,
+            revision=revision,
+            limit=limit,
+            max_retries=max_retries,
+            retry_wait=retry_wait,
+            logger=logger,
+        )
+        for idx, row in tqdm(rows, desc=f"stream {source}", unit="docs"):
             text = row.get(text_field) or ""
             doc_id = row.get(id_field) or stable_hash(f"{source}:{idx}:{text}")
             meta = {k: row.get(k) for k in meta_fields if k in row}
@@ -188,6 +244,8 @@ def stream_hf_to_normalized(
     id_field: Optional[str] = None,
     meta_fields: Optional[List[str]] = None,
     license_tag: Optional[str] = None,
+    max_retries: int = 5,
+    retry_wait: float = 1.0,
     logger=None,
     log_every: int = 300,
 ) -> None:
@@ -217,6 +275,8 @@ def stream_hf_to_normalized(
         meta_fields=meta_fields,
         license_tag=license_tag,
         revision=revision,
+        max_retries=max_retries,
+        retry_wait=retry_wait,
         logger=logger,
         log_every=log_every,
     )

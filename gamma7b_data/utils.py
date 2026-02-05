@@ -154,13 +154,20 @@ def initialize_runtime(
     logger: Optional[logging.Logger] = None,
     cpu_threads: int = 16,
     faiss_gpu_device: int = 1,
+    enable_faiss: bool = True,
 ) -> None:
     global _RUNTIME_INITIALIZED
     if _RUNTIME_INITIALIZED:
         return
     _RUNTIME_INITIALIZED = True
     set_default_threads(cpu_threads, logger=logger)
-    enable_faiss_gpu(device_id=faiss_gpu_device, logger=logger)
+    if enable_faiss and faiss_gpu_device > 0:
+        enable_faiss_gpu(device_id=faiss_gpu_device, logger=logger)
+    elif logger:
+        if enable_faiss:
+            logger.info("faiss gpu check skipped (faiss_gpu_device=%s)", faiss_gpu_device)
+        else:
+            logger.info("faiss gpu check skipped for this command")
     if logger:
         logger.info("log cadence: every %s records", get_log_every())
 
